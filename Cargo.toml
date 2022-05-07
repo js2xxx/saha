@@ -1,0 +1,9 @@
+[package]
+edition = "2021"
+name = "saha"
+version = "0.1.0"
+
+[dependencies]
+
+[dev-dependencies]
+rand = "0.8"
