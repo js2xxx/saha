@@ -1,4 +1,5 @@
 #![allow(unused_unsafe)]
+#![feature(associated_type_bounds)]
 #![feature(build_hasher_simple_hash_one)]
 #![feature(once_cell)]
 #![feature(type_alias_impl_trait)]
@@ -7,6 +8,7 @@
 #[cfg(test)]
 extern crate test;
 
+mod common;
 mod adaptive;
 mod array;
 mod large;

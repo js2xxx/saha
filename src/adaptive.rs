@@ -155,7 +155,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
             KeyRef::S8(key) => self.small8.insert(key, hash, value, &self.hasher),
             KeyRef::S16(key) => self.small16.insert(key, hash, value, &self.hasher),
             KeyRef::S24(key) => self.small24.insert(key, hash, value, &self.hasher),
-            KeyRef::Large(key) => self.large.insert(key, hash, value),
+            KeyRef::Large(key) => self.large.insert(key, hash, value, &self.hasher),
         }
     }
 
@@ -176,7 +176,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
             KeyRef::S8(key) => self.small8.try_insert(key, hash, value, &self.hasher),
             KeyRef::S16(key) => self.small16.try_insert(key, hash, value, &self.hasher),
             KeyRef::S24(key) => self.small24.try_insert(key, hash, value, &self.hasher),
-            KeyRef::Large(key) => self.large.try_insert(key, hash, value),
+            KeyRef::Large(key) => self.large.try_insert(key, hash, value, &self.hasher),
         }
     }
 
@@ -191,7 +191,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
             KeyRef::S8(key) => self.small8.remove(key, hash, &self.hasher),
             KeyRef::S16(key) => self.small16.remove(key, hash, &self.hasher),
             KeyRef::S24(key) => self.small24.remove(key, hash, &self.hasher),
-            KeyRef::Large(key) => self.large.remove(key, hash),
+            KeyRef::Large(key) => self.large.remove(key, hash, &self.hasher),
         }
     }
 
