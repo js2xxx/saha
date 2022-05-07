@@ -264,6 +264,45 @@ impl<T, S> StringMap<T, S> {
     }
 }
 
+impl<T, S> IntoIterator for StringMap<T, S> {
+    type Item = (Vec<u8>, T);
+
+    type IntoIter = impl Iterator<Item = (Vec<u8>, T)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        { self.none_key.into_iter().map(|value| (vec![], value)) }
+            .chain(
+                self.small0
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value)),
+            )
+            .chain(self.small8.into_iter())
+            .chain(self.small16.into_iter())
+            .chain(self.small24.into_iter())
+            .chain(self.large.into_iter())
+    }
+}
+
+impl<'a, T, S> IntoIterator for &'a StringMap<T, S> {
+    type Item = (KeyRef<'a>, &'a T);
+
+    type IntoIter = impl Iterator<Item = (KeyRef<'a>, &'a T)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T, S> IntoIterator for &'a mut StringMap<T, S> {
+    type Item = (KeyRef<'a>, &'a mut T);
+
+    type IntoIter = impl Iterator<Item = (KeyRef<'a>, &'a mut T)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 impl<T> Default for StringMap<T, RandomState> {
     fn default() -> Self {
         Self::new()
@@ -342,8 +381,8 @@ mod tests {
                 }
             });
 
-            for (key, value) in map.iter() {
-                let _ = key.key();
+            for (key, value) in map {
+                let _ = key;
                 let _ = value;
             }
         })
@@ -356,13 +395,13 @@ mod tests {
 
             let data = gen_group_data(map.hasher());
 
-            data.into_iter().for_each(|key| {
+            data.into_iter().for_each(|(key, _)| {
                 if let Err(mut err) = map.try_insert(key, 1) {
                     *err.entry.get_mut() += 1;
                 }
             });
 
-            for (key, value) in map.iter() {
+            for (key, value) in map {
                 let _ = key;
                 let _ = value;
             }

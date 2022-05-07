@@ -1,6 +1,7 @@
 #![allow(unused_unsafe)]
 #![feature(build_hasher_simple_hash_one)]
 #![feature(once_cell)]
+#![feature(type_alias_impl_trait)]
 #![cfg_attr(test, feature(test, map_try_insert))]
 
 #[cfg(test)]

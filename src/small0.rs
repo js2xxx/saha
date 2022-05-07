@@ -105,6 +105,26 @@ impl<T> IntoIterator for StringMap<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a StringMap<T> {
+    type Item = ([u8; 2], &'a T);
+
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut StringMap<T> {
+    type Item = ([u8; 2], &'a mut T);
+
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 pub struct Iter<'a, T> {
     bucket: &'a [Option<T>],
     index: usize,

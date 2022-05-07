@@ -222,7 +222,7 @@ impl<T, const N: usize> StringMap<T, N> {
 }
 
 impl<T, const N: usize> IntoIterator for StringMap<T, N> {
-    type Item = ([u8; N], T);
+    type Item = (Vec<u8>, T);
 
     type IntoIter = IntoIter<T, N>;
 
@@ -231,6 +231,26 @@ impl<T, const N: usize> IntoIterator for StringMap<T, N> {
             bucket: self.bucket.into_iter(),
             rem: self.len,
         }
+    }
+}
+
+impl<'a, T, const N: usize> IntoIterator for &'a StringMap<T, N> {
+    type Item = (&'a [u8], &'a T);
+
+    type IntoIter = Iter<'a, T, N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T, const N: usize> IntoIterator for &'a mut StringMap<T, N> {
+    type Item = (&'a [u8], &'a mut T);
+
+    type IntoIter = IterMut<'a, T, N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 
@@ -353,7 +373,7 @@ impl<T, const N: usize> IntoIter<T, N> {
 }
 
 impl<T, const N: usize> Iterator for IntoIter<T, N> {
-    type Item = ([u8; N], T);
+    type Item = (Vec<u8>, T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.rem == 0 {
@@ -364,7 +384,7 @@ impl<T, const N: usize> Iterator for IntoIter<T, N> {
                 Some(slot) => {
                     if let Slot::Data(data) = slot {
                         self.rem -= 1;
-                        break Some((data.key, data.value));
+                        break Some((Vec::from(&data.key[..data.len]), data.value));
                     }
                 }
                 None => break None,

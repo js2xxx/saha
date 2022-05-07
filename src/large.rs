@@ -224,6 +224,26 @@ impl<T> IntoIterator for StringMap<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a StringMap<T> {
+    type Item = (&'a [u8], &'a T);
+
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut StringMap<T> {
+    type Item = (&'a [u8], &'a mut T);
+
+    type IntoIter = IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for StringMap<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map().entries(self.iter()).finish()
