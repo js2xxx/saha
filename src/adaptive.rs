@@ -9,9 +9,9 @@ use crate::{LargeStringMap, Small0StringMap, SmallStringMap};
 pub enum KeyRef<'a> {
     None,
     S0([u8; 2]),
-    S8([u8; 8]),
-    S16([u8; 16]),
-    S24([u8; 24]),
+    S8(&'a [u8]),
+    S16(&'a [u8]),
+    S24(&'a [u8]),
     Large(&'a [u8]),
 }
 
@@ -20,9 +20,9 @@ impl<'a> KeyRef<'a> {
         match self {
             KeyRef::None => &[],
             KeyRef::S0(key) => key.split(|&b| b == 0).next().unwrap(),
-            KeyRef::S8(key) => key.split(|&b| b == 0).next().unwrap(),
-            KeyRef::S16(key) => key.split(|&b| b == 0).next().unwrap(),
-            KeyRef::S24(key) => key.split(|&b| b == 0).next().unwrap(),
+            KeyRef::S8(key) => key,
+            KeyRef::S16(key) => key,
+            KeyRef::S24(key) => key,
             KeyRef::Large(key) => key,
         }
     }
@@ -34,21 +34,9 @@ impl<'a> From<&'a [NonZeroU8]> for KeyRef<'a> {
         match key {
             [] => KeyRef::None,
             &[key] => KeyRef::S0([key.get(), 0]),
-            key if len < 8 => {
-                let mut ret = [0; 8];
-                ret[0..len].copy_from_slice(unsafe { mem::transmute(key) });
-                KeyRef::S8(ret)
-            }
-            key if len < 16 => {
-                let mut ret = [0; 16];
-                ret[0..len].copy_from_slice(unsafe { mem::transmute(key) });
-                KeyRef::S16(ret)
-            }
-            key if len < 24 => {
-                let mut ret = [0; 24];
-                ret[0..len].copy_from_slice(unsafe { mem::transmute(key) });
-                KeyRef::S24(ret)
-            }
+            key if len <= 8 => KeyRef::S8(unsafe { mem::transmute(key) }),
+            key if len <= 16 => KeyRef::S16(unsafe { mem::transmute(key) }),
+            key if len <= 24 => KeyRef::S24(unsafe { mem::transmute(key) }),
             key => KeyRef::Large(unsafe { mem::transmute(key) }),
         }
     }
@@ -59,21 +47,9 @@ impl<'a, const N: usize> From<&'a [NonZeroU8; N]> for KeyRef<'a> {
         match key as &[NonZeroU8] {
             [] => KeyRef::None,
             &[key] => KeyRef::S0([key.get(), 0]),
-            key if N < 8 => {
-                let mut ret = [0; 8];
-                ret[0..N].copy_from_slice(unsafe { mem::transmute(key) });
-                KeyRef::S8(ret)
-            }
-            key if N < 16 => {
-                let mut ret = [0; 16];
-                ret[0..N].copy_from_slice(unsafe { mem::transmute(key) });
-                KeyRef::S16(ret)
-            }
-            key if N < 24 => {
-                let mut ret = [0; 24];
-                ret[0..N].copy_from_slice(unsafe { mem::transmute(key) });
-                KeyRef::S24(ret)
-            }
+            key if N <= 8 => KeyRef::S8(unsafe { mem::transmute(key) }),
+            key if N <= 16 => KeyRef::S16(unsafe { mem::transmute(key) }),
+            key if N <= 24 => KeyRef::S24(unsafe { mem::transmute(key) }),
             key => KeyRef::Large(unsafe { mem::transmute(key) }),
         }
     }
@@ -150,9 +126,9 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
         match key {
             KeyRef::None => self.none_key.as_ref(),
             KeyRef::S0(key) => self.small0.get(&key),
-            KeyRef::S8(key) => self.small8.get(&key, hash),
-            KeyRef::S16(key) => self.small16.get(&key, hash),
-            KeyRef::S24(key) => self.small24.get(&key, hash),
+            KeyRef::S8(key) => self.small8.get(key, hash),
+            KeyRef::S16(key) => self.small16.get(key, hash),
+            KeyRef::S24(key) => self.small24.get(key, hash),
             KeyRef::Large(key) => self.large.get(key, hash),
         }
     }
@@ -165,9 +141,9 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
         match key {
             KeyRef::None => self.none_key.as_mut(),
             KeyRef::S0(key) => self.small0.get_mut(&key),
-            KeyRef::S8(key) => self.small8.get_mut(&key, hash),
-            KeyRef::S16(key) => self.small16.get_mut(&key, hash),
-            KeyRef::S24(key) => self.small24.get_mut(&key, hash),
+            KeyRef::S8(key) => self.small8.get_mut(key, hash),
+            KeyRef::S16(key) => self.small16.get_mut(key, hash),
+            KeyRef::S24(key) => self.small24.get_mut(key, hash),
             KeyRef::Large(key) => self.large.get_mut(key, hash),
         }
     }
@@ -180,9 +156,9 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
         match key {
             KeyRef::None => self.none_key.replace(value),
             KeyRef::S0(key) => self.small0.insert(&key, value),
-            KeyRef::S8(key) => self.small8.insert(&key, hash, value, &self.hasher),
-            KeyRef::S16(key) => self.small16.insert(&key, hash, value, &self.hasher),
-            KeyRef::S24(key) => self.small24.insert(&key, hash, value, &self.hasher),
+            KeyRef::S8(key) => self.small8.insert(key, hash, value, &self.hasher),
+            KeyRef::S16(key) => self.small16.insert(key, hash, value, &self.hasher),
+            KeyRef::S24(key) => self.small24.insert(key, hash, value, &self.hasher),
             KeyRef::Large(key) => self.large.insert(key, hash, value),
         }
     }
@@ -201,9 +177,9 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
                 }
             },
             KeyRef::S0(key) => self.small0.try_insert(&key, value),
-            KeyRef::S8(key) => self.small8.try_insert(&key, hash, value, &self.hasher),
-            KeyRef::S16(key) => self.small16.try_insert(&key, hash, value, &self.hasher),
-            KeyRef::S24(key) => self.small24.try_insert(&key, hash, value, &self.hasher),
+            KeyRef::S8(key) => self.small8.try_insert(key, hash, value, &self.hasher),
+            KeyRef::S16(key) => self.small16.try_insert(key, hash, value, &self.hasher),
+            KeyRef::S24(key) => self.small24.try_insert(key, hash, value, &self.hasher),
             KeyRef::Large(key) => self.large.try_insert(key, hash, value),
         }
     }
@@ -216,9 +192,9 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
         match key {
             KeyRef::None => self.none_key.take(),
             KeyRef::S0(key) => self.small0.remove(&key),
-            KeyRef::S8(key) => self.small8.remove(&key, hash, &self.hasher),
-            KeyRef::S16(key) => self.small16.remove(&key, hash, &self.hasher),
-            KeyRef::S24(key) => self.small24.remove(&key, hash, &self.hasher),
+            KeyRef::S8(key) => self.small8.remove(key, hash, &self.hasher),
+            KeyRef::S16(key) => self.small16.remove(key, hash, &self.hasher),
+            KeyRef::S24(key) => self.small24.remove(key, hash, &self.hasher),
             KeyRef::Large(key) => self.large.remove(key, hash),
         }
     }
@@ -318,7 +294,7 @@ mod tests {
 
         // Test conflict conditions
         for _ in 0..100000 {
-            let value = rand::random::<[NonZeroU8; 2]>();
+            let value = rand::random::<[NonZeroU8; 4]>();
 
             map.insert(KeyRef::from(&value), Vec::from(value));
             cmp.insert(

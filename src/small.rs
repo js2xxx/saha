@@ -8,6 +8,7 @@ const MIN_CAPACITY: usize = 8;
 
 struct SlotData<T, const N: usize> {
     key: [u8; N],
+    len: usize,
     value: T,
 }
 
@@ -91,13 +92,15 @@ impl<T: Hash, const N: usize> StringMap<T, N> {
         let slot = self
             .lookup_or_free(key, hash)
             .expect("Failed to lookup slot");
-        let old = mem::replace(
-            unsafe { &mut *slot },
-            Slot::Data(SlotData {
-                key: key.try_into().unwrap(),
+        let old = mem::replace(unsafe { &mut *slot }, {
+            let mut data = SlotData {
+                key: [0; N],
+                len: key.len(),
                 value,
-            }),
-        );
+            };
+            data.key[..data.len].copy_from_slice(key);
+            Slot::Data(data)
+        });
         self.len += 1;
 
         if self.len * LOAD_FACTOR_N / LOAD_FACTOR_D >= self.bucket.len() {
@@ -120,13 +123,15 @@ impl<T: Hash, const N: usize> StringMap<T, N> {
         let slot = self
             .lookup_or_free(key, hash)
             .expect("Failed to lookup slot");
-        let slot = unsafe { &mut *slot };
-        match slot {
+        match unsafe { &mut *slot } {
             Slot::Empty | Slot::Deleted => {
-                slot.insert(SlotData {
-                    key: key.try_into().unwrap(),
+                let mut data = SlotData {
+                    key: [0; N],
+                    len: key.len(),
                     value,
-                });
+                };
+                data.key[..data.len].copy_from_slice(key);
+                unsafe { &mut *slot }.insert(data);
                 self.len += 1;
 
                 if self.len * LOAD_FACTOR_N / LOAD_FACTOR_D >= self.bucket.len() {
@@ -161,7 +166,9 @@ impl<T: Hash, const N: usize> StringMap<T, N> {
             let slot = &self.bucket[((hash as usize) + i) % len];
             match slot {
                 Slot::Empty => return None,
-                Slot::Data(data) if data.key == key => return Some(slot as *const _ as _),
+                Slot::Data(data) if &data.key[..data.len] == key => {
+                    return Some(slot as *const _ as _)
+                }
                 _ => {}
             }
         }
@@ -174,7 +181,9 @@ impl<T: Hash, const N: usize> StringMap<T, N> {
             let slot = &self.bucket[((hash as usize) + i) % len];
             match slot {
                 Slot::Empty | Slot::Deleted => return Some(slot as *const _ as _),
-                Slot::Data(data) if data.key == key => return Some(slot as *const _ as _),
+                Slot::Data(data) if &data.key[..data.len] == key => {
+                    return Some(slot as *const _ as _)
+                }
                 _ => {}
             }
         }
@@ -188,7 +197,7 @@ impl<T: Hash, const N: usize> StringMap<T, N> {
         for item in bucket {
             if let Slot::Data(data) = item {
                 let slot = self
-                    .lookup_or_free(&data.key, hasher.hash_one(data.key))
+                    .lookup_or_free(&data.key, hasher.hash_one(&data.key[..data.len]))
                     .unwrap();
                 unsafe { (*slot).insert(data) };
             }
@@ -237,7 +246,7 @@ pub struct Iter<'a, T, const N: usize> {
 }
 
 impl<'a, T, const N: usize> Iterator for Iter<'a, T, N> {
-    type Item = ([u8; N], &'a T);
+    type Item = (&'a [u8], &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.rem == 0 {
@@ -249,7 +258,7 @@ impl<'a, T, const N: usize> Iterator for Iter<'a, T, N> {
                     self.bucket = rem;
                     if let Slot::Data(data) = slot {
                         self.rem -= 1;
-                        break Some((data.key, &data.value));
+                        break Some((&data.key[..data.len], &data.value));
                     }
                 }
                 None => break None,
@@ -295,7 +304,7 @@ impl<'a, T, const N: usize> IterMut<'a, T, N> {
 }
 
 impl<'a, T, const N: usize> Iterator for IterMut<'a, T, N> {
-    type Item = ([u8; N], &'a mut T);
+    type Item = (&'a [u8], &'a mut T);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.rem == 0 {
@@ -307,7 +316,7 @@ impl<'a, T, const N: usize> Iterator for IterMut<'a, T, N> {
                     self.bucket = rem;
                     if let Slot::Data(data) = slot {
                         self.rem -= 1;
-                        break Some((data.key, &mut data.value));
+                        break Some((&data.key[..data.len], &mut data.value));
                     }
                 }
                 None => break None,
@@ -387,33 +396,58 @@ mod tests {
 
     #[test]
     fn test_hash_map() {
-        let mut map = StringMap::<u64, 8>::new();
+        let mut map = StringMap::<u64, 16>::new();
         let mut cmp = HashMap::new();
         let hasher = RandomState::default();
 
-        for _ in 0..50000 {
+        for _ in 0..10 {
             let value = rand::random::<u64>();
             let key = value.to_ne_bytes();
             let hash = hasher.hash_one(key);
 
-            map.insert(&key, hash, value, &hasher);
-            cmp.insert(key.to_vec(), value);
+            let a1 = map.insert(&key, hash, value, &hasher);
+            let a2 = cmp.insert(key.to_vec(), value);
+            assert_eq!(a1, a2);
         }
 
         // Test conflict conditions
-        for _ in 0..100000 {
+        for _ in 0..1000 {
             let value = rand::random::<u16>() as u64;
             let key = value.to_ne_bytes();
             let hash = hasher.hash_one(key);
 
-            map.insert(&key, hash, value, &hasher);
-            cmp.insert(key.to_vec(), value);
+            let a1 = map.insert(&key, hash, value, &hasher);
+            let a2 = cmp.insert(key.to_vec(), value);
+            assert_eq!(a1, a2);
         }
 
-        for (k, v) in map {
-            let value = cmp.remove(&k as &[u8]);
+        for (k, &v) in map.iter() {
+            let value = cmp.remove(k);
             assert_eq!(value, Some(v));
         }
         assert!(cmp.is_empty());
+    }
+
+    #[test]
+    fn test_conflict() {
+        let mut map = StringMap::<u64, 16>::new();
+        let hasher = RandomState::default();
+
+        let value = 111111111111111u64;
+        let key = value.to_ne_bytes();
+        let hash = hasher.hash_one(&key as &[u8]);
+
+        let a = map.insert(&key, hash, value, &hasher);
+        assert_eq!(a, None);
+
+        for _ in 0..7 {
+            let value = rand::random::<u64>();
+            let key = value.to_ne_bytes();
+            let hash = hasher.hash_one(&key as &[u8]);
+
+            map.insert(&key, hash, value, &hasher);
+        }
+        let a = map.insert(&key, hash, value, &hasher);
+        assert_eq!(a, Some(value));
     }
 }
