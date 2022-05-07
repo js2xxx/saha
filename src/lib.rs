@@ -8,11 +8,11 @@
 extern crate test;
 
 mod adaptive;
+mod array;
 mod large;
 mod small;
-mod small0;
 
 pub use self::adaptive::StringMap;
+pub use self::array::StringMap as ArrayStringMap;
 pub use self::large::StringMap as LargeStringMap;
 pub use self::small::StringMap as SmallStringMap;
-pub use self::small0::StringMap as Small0StringMap;

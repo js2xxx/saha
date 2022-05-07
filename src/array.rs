@@ -7,11 +7,11 @@ pub struct StringMap<T> {
 }
 
 fn to_index(key: &[u8]) -> usize {
-    u16::from_ne_bytes(key.try_into().unwrap()) as usize
+    key.iter().fold(0, |acc, &v| ((acc << 8) | v as usize))
 }
 
 fn from_index(index: usize) -> [u8; 2] {
-    (index as u16).to_ne_bytes()
+    (index as u16).to_be_bytes()
 }
 
 impl<T> StringMap<T> {
@@ -303,7 +303,7 @@ mod tests {
         // Test conflict conditions
         for _ in 0..100000 {
             let value = rand::random::<u16>();
-            let key = value.to_ne_bytes();
+            let key = value.to_be_bytes();
 
             map.insert(&key, value);
             cmp.insert(key, value);

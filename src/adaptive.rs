@@ -3,12 +3,12 @@ use std::hash::{BuildHasher, Hash};
 use std::mem;
 use std::num::NonZeroU8;
 
-use crate::{LargeStringMap, Small0StringMap, SmallStringMap};
+use crate::{LargeStringMap, SmallStringMap};
 
 #[derive(Debug, Clone, Copy)]
 pub enum KeyRef<'a> {
     None,
-    S0([u8; 2]),
+    // S0([u8; 2]),
     S8(&'a [u8]),
     S16(&'a [u8]),
     S24(&'a [u8]),
@@ -19,11 +19,8 @@ impl<'a> KeyRef<'a> {
     pub fn key(&self) -> &[u8] {
         match self {
             KeyRef::None => &[],
-            KeyRef::S0(key) => key.split(|&b| b == 0).next().unwrap(),
-            KeyRef::S8(key) => key,
-            KeyRef::S16(key) => key,
-            KeyRef::S24(key) => key,
-            KeyRef::Large(key) => key,
+            // KeyRef::S0(key) => key.split(|&b| b == 0).next().unwrap(),
+            KeyRef::S8(key) | KeyRef::S16(key) | KeyRef::S24(key) | KeyRef::Large(key) => key,
         }
     }
 }
@@ -33,7 +30,7 @@ impl<'a> From<&'a [NonZeroU8]> for KeyRef<'a> {
         let len = key.len();
         match key {
             [] => KeyRef::None,
-            &[key] => KeyRef::S0([key.get(), 0]),
+            // &[key] => KeyRef::S0([key.get(), 0]),
             key if len <= 8 => KeyRef::S8(unsafe { mem::transmute(key) }),
             key if len <= 16 => KeyRef::S16(unsafe { mem::transmute(key) }),
             key if len <= 24 => KeyRef::S24(unsafe { mem::transmute(key) }),
@@ -46,7 +43,7 @@ impl<'a, const N: usize> From<&'a [NonZeroU8; N]> for KeyRef<'a> {
     fn from(key: &'a [NonZeroU8; N]) -> Self {
         match key as &[NonZeroU8] {
             [] => KeyRef::None,
-            &[key] => KeyRef::S0([key.get(), 0]),
+            // &[key] => KeyRef::S0([key.get(), 0]),
             key if N <= 8 => KeyRef::S8(unsafe { mem::transmute(key) }),
             key if N <= 16 => KeyRef::S16(unsafe { mem::transmute(key) }),
             key if N <= 24 => KeyRef::S24(unsafe { mem::transmute(key) }),
@@ -59,18 +56,17 @@ impl<'a> Hash for KeyRef<'a> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             KeyRef::None => (&[] as &[u8]).hash(state),
-            KeyRef::S0(key) => (key as &[u8]).hash(state),
-            KeyRef::S8(key) => (key as &[u8]).hash(state),
-            KeyRef::S16(key) => (key as &[u8]).hash(state),
-            KeyRef::S24(key) => (key as &[u8]).hash(state),
-            &KeyRef::Large(key) => key.hash(state),
+            // KeyRef::S0(key) => (key as &[u8]).hash(state),
+            KeyRef::S8(key) | KeyRef::S16(key) | KeyRef::S24(key) | KeyRef::Large(key) => {
+                (key as &[u8]).hash(state)
+            }
         }
     }
 }
 
 pub struct StringMap<T, S> {
     none_key: Option<T>,
-    small0: Small0StringMap<T>,
+    // array: ArrayStringMap<T>,
     small8: SmallStringMap<T, 8>,
     small16: SmallStringMap<T, 16>,
     small24: SmallStringMap<T, 24>,
@@ -82,7 +78,7 @@ impl<T, S> StringMap<T, S> {
     pub fn with_hasher(hasher: S) -> Self {
         StringMap {
             none_key: None,
-            small0: Small0StringMap::new(),
+            // array: ArrayStringMap::new(2),
             small8: SmallStringMap::new(),
             small16: SmallStringMap::new(),
             small24: SmallStringMap::new(),
@@ -97,7 +93,7 @@ impl<T, S> StringMap<T, S> {
 
     pub fn len(&self) -> usize {
         (self.none_key.is_some() as usize)
-            + self.small0.len()
+            // + self.array.len()
             + self.small8.len()
             + self.small16.len()
             + self.small24.len()
@@ -107,7 +103,7 @@ impl<T, S> StringMap<T, S> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.none_key.is_none()
-            && self.small0.is_empty()
+            // && self.array.is_empty()
             && self.small8.is_empty()
             && self.small16.is_empty()
             && self.small24.is_empty()
@@ -125,7 +121,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
     pub fn get_hashed(&self, key: KeyRef, hash: u64) -> Option<&T> {
         match key {
             KeyRef::None => self.none_key.as_ref(),
-            KeyRef::S0(key) => self.small0.get(&key),
+            // KeyRef::S0(key) => self.array.get(&key),
             KeyRef::S8(key) => self.small8.get(key, hash),
             KeyRef::S16(key) => self.small16.get(key, hash),
             KeyRef::S24(key) => self.small24.get(key, hash),
@@ -140,7 +136,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
     pub fn get_mut_hashed(&mut self, key: KeyRef, hash: u64) -> Option<&mut T> {
         match key {
             KeyRef::None => self.none_key.as_mut(),
-            KeyRef::S0(key) => self.small0.get_mut(&key),
+            // KeyRef::S0(key) => self.array.get_mut(&key),
             KeyRef::S8(key) => self.small8.get_mut(key, hash),
             KeyRef::S16(key) => self.small16.get_mut(key, hash),
             KeyRef::S24(key) => self.small24.get_mut(key, hash),
@@ -155,7 +151,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
     pub fn insert_hashed(&mut self, key: KeyRef, hash: u64, value: T) -> Option<T> {
         match key {
             KeyRef::None => self.none_key.replace(value),
-            KeyRef::S0(key) => self.small0.insert(&key, value),
+            // KeyRef::S0(key) => self.array.insert(&key, value),
             KeyRef::S8(key) => self.small8.insert(key, hash, value, &self.hasher),
             KeyRef::S16(key) => self.small16.insert(key, hash, value, &self.hasher),
             KeyRef::S24(key) => self.small24.insert(key, hash, value, &self.hasher),
@@ -176,7 +172,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
                     None
                 }
             },
-            KeyRef::S0(key) => self.small0.try_insert(&key, value),
+            // KeyRef::S0(key) => self.array.try_insert(&key, value),
             KeyRef::S8(key) => self.small8.try_insert(key, hash, value, &self.hasher),
             KeyRef::S16(key) => self.small16.try_insert(key, hash, value, &self.hasher),
             KeyRef::S24(key) => self.small24.try_insert(key, hash, value, &self.hasher),
@@ -191,7 +187,7 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
     pub fn remove_hashed(&mut self, key: KeyRef, hash: u64) -> Option<T> {
         match key {
             KeyRef::None => self.none_key.take(),
-            KeyRef::S0(key) => self.small0.remove(&key),
+            // KeyRef::S0(key) => self.array.remove(&key),
             KeyRef::S8(key) => self.small8.remove(key, hash, &self.hasher),
             KeyRef::S16(key) => self.small16.remove(key, hash, &self.hasher),
             KeyRef::S24(key) => self.small24.remove(key, hash, &self.hasher),
@@ -207,11 +203,11 @@ impl<T: Hash, S: BuildHasher> StringMap<T, S> {
 impl<T, S> StringMap<T, S> {
     pub fn iter(&self) -> impl Iterator<Item = (KeyRef, &T)> {
         { self.none_key.iter().map(|value| (KeyRef::None, value)) }
-            .chain(
-                self.small0
-                    .iter()
-                    .map(|(key, value)| (KeyRef::S0(key), value)),
-            )
+            // .chain(
+            //     self.array
+            //         .iter()
+            //         .map(|(key, value)| (KeyRef::S0(key), value)),
+            // )
             .chain(
                 self.small8
                     .iter()
@@ -236,11 +232,11 @@ impl<T, S> StringMap<T, S> {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (KeyRef, &mut T)> {
         { self.none_key.iter_mut().map(|value| (KeyRef::None, value)) }
-            .chain(
-                self.small0
-                    .iter_mut()
-                    .map(|(key, value)| (KeyRef::S0(key), value)),
-            )
+            // .chain(
+            //     self.array
+            //         .iter_mut()
+            //         .map(|(key, value)| (KeyRef::S0(key), value)),
+            // )
             .chain(
                 self.small8
                     .iter_mut()
@@ -271,11 +267,11 @@ impl<T, S> IntoIterator for StringMap<T, S> {
 
     fn into_iter(self) -> Self::IntoIter {
         { self.none_key.into_iter().map(|value| (vec![], value)) }
-            .chain(
-                self.small0
-                    .into_iter()
-                    .map(|(key, value)| (key.into(), value)),
-            )
+            // .chain(
+            //     self.array
+            //         .into_iter()
+            //         .map(|(key, value)| (key.into(), value)),
+            // )
             .chain(self.small8.into_iter())
             .chain(self.small16.into_iter())
             .chain(self.small24.into_iter())
