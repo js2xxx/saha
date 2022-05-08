@@ -2,14 +2,16 @@ use std::hash::BuildHasher;
 use std::iter::FusedIterator;
 use std::{fmt, hint, mem};
 
+use bumpalo::Bump;
+
 const LOAD_FACTOR_N: usize = 3;
 const LOAD_FACTOR_D: usize = 2;
 const MIN_CAPACITY: usize = 8;
 
-pub trait SlotData {
+pub trait SlotData<'a> {
     type Value;
 
-    fn new(key: &[u8], hash: u64, value: Self::Value) -> Self;
+    fn new(key_alloc: &'a Bump, key: &[u8], hash: u64, value: Self::Value) -> Self;
 
     fn key(&self) -> &[u8];
 
@@ -21,7 +23,7 @@ pub trait SlotData {
 
     fn into_value(self) -> Self::Value;
 
-    fn into_kv(self) -> (Vec<u8>, Self::Value);
+    fn into_kv(self, key_alloc: &'a Bump) -> (&'a [u8], Self::Value);
 }
 
 pub enum Slot<D> {
@@ -31,12 +33,23 @@ pub enum Slot<D> {
 }
 
 impl<D> Slot<D> {
-    fn insert(&mut self, data: D) -> &mut D {
+    pub fn insert(&mut self, data: D) -> Option<D> {
+        let old = self.remove();
         *self = Slot::Data(data);
-        unsafe { &mut *Self::data_ptr(self) }
+        old
     }
 
-    fn remove(&mut self) -> Option<D> {
+    pub fn try_insert(&mut self, data: D) -> Option<(&mut D, D)> {
+        match self {
+            Slot::Deleted | Slot::Empty => {
+                *self = Slot::Data(data);
+                None
+            }
+            Slot::Data(d) => Some((d, data)),
+        }
+    }
+
+    pub fn remove(&mut self) -> Option<D> {
         match mem::replace(self, Slot::Deleted) {
             Slot::Data(data) => Some(data),
             _ => None,
@@ -51,20 +64,25 @@ impl<D> Slot<D> {
     }
 }
 
-pub struct StringMap<D> {
+pub struct StringMap<'a, D: 'a> {
     bucket: Vec<Slot<D>>,
     len: usize,
+    key_alloc: &'a Bump,
 }
 
-impl<D> StringMap<D> {
-    pub fn new() -> Self {
-        Self::with_capacity(MIN_CAPACITY)
+impl<'a, D> StringMap<'a, D> {
+    pub fn new(key_alloc: &'a Bump) -> Self {
+        Self::with_capacity(MIN_CAPACITY, key_alloc)
     }
 
-    pub fn with_capacity(cap: usize) -> Self {
+    pub fn with_capacity(cap: usize, key_alloc: &'a Bump) -> Self {
         let mut bucket = Vec::with_capacity(cap.max(MIN_CAPACITY));
         bucket.resize_with(cap, || Slot::<D>::Empty);
-        StringMap { bucket, len: 0 }
+        StringMap {
+            bucket,
+            len: 0,
+            key_alloc,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -77,13 +95,7 @@ impl<D> StringMap<D> {
     }
 }
 
-impl<D> Default for StringMap<D> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<D: SlotData> StringMap<D> {
+impl<'a, D: SlotData<'a>> StringMap<'a, D> {
     pub fn get(&self, key: &[u8], hash: u64) -> Option<&D::Value> {
         self.lookup(key, hash)
             .map(|ptr| unsafe { (*Slot::data_ptr(ptr)).value() })
@@ -105,7 +117,7 @@ impl<D: SlotData> StringMap<D> {
             .lookup_or_free(key, hash)
             .expect("Failed to lookup slot");
         let old = mem::replace(unsafe { &mut *slot }, {
-            Slot::Data(D::new(key, hash, value))
+            Slot::Data(D::new(self.key_alloc, key, hash, value))
         });
         self.len += 1;
 
@@ -131,7 +143,7 @@ impl<D: SlotData> StringMap<D> {
             .expect("Failed to lookup slot");
         match unsafe { &mut *slot } {
             Slot::Empty | Slot::Deleted => {
-                unsafe { &mut *slot }.insert(D::new(key, hash, value));
+                unsafe { &mut *slot }.insert(D::new(self.key_alloc, key, hash, value));
                 self.len += 1;
 
                 if self.len * LOAD_FACTOR_N / LOAD_FACTOR_D >= self.bucket.len() {
@@ -164,7 +176,7 @@ impl<D: SlotData> StringMap<D> {
     }
 }
 
-impl<D: SlotData> StringMap<D> {
+impl<'a, D: SlotData<'a>> StringMap<'a, D> {
     fn lookup(&self, key: &[u8], hash: u64) -> Option<*mut Slot<D>> {
         let len = self.bucket.len();
         for i in 0..len {
@@ -209,7 +221,7 @@ impl<D: SlotData> StringMap<D> {
     }
 }
 
-impl<D> StringMap<D> {
+impl<'a, D> StringMap<'a, D> {
     pub fn iter(&self) -> Iter<D> {
         Iter {
             bucket: &self.bucket,
@@ -225,20 +237,21 @@ impl<D> StringMap<D> {
     }
 }
 
-impl<D: SlotData> IntoIterator for StringMap<D> {
-    type Item = (Vec<u8>, D::Value);
+impl<'a, D: SlotData<'a>> IntoIterator for StringMap<'a, D> {
+    type Item = (&'a [u8], D::Value);
 
-    type IntoIter = IntoIter<D>;
+    type IntoIter = IntoIter<'a, D>;
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
             bucket: self.bucket.into_iter(),
             rem: self.len,
+            key_alloc: self.key_alloc,
         }
     }
 }
 
-impl<'a, D: SlotData> IntoIterator for &'a StringMap<D> {
+impl<'a, D: SlotData<'a>> IntoIterator for &'a StringMap<'a, D> {
     type Item = (&'a [u8], &'a D::Value);
 
     type IntoIter = Iter<'a, D>;
@@ -248,7 +261,7 @@ impl<'a, D: SlotData> IntoIterator for &'a StringMap<D> {
     }
 }
 
-impl<'a, D: SlotData> IntoIterator for &'a mut StringMap<D> {
+impl<'a, D: SlotData<'a>> IntoIterator for &'a mut StringMap<'a, D> {
     type Item = (&'a [u8], &'a mut D::Value);
 
     type IntoIter = IterMut<'a, D>;
@@ -258,18 +271,18 @@ impl<'a, D: SlotData> IntoIterator for &'a mut StringMap<D> {
     }
 }
 
-impl<D: fmt::Debug + SlotData<Value: fmt::Debug>> fmt::Debug for StringMap<D> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
-    }
-}
+// impl<'a, D: fmt::Debug + SlotData<'a, Value: fmt::Debug>> fmt::Debug for StringMap<'a, D> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         f.debug_map().entries(self.iter()).finish()
+//     }
+// }
 
 pub struct Iter<'a, D> {
     bucket: &'a [Slot<D>],
     rem: usize,
 }
 
-impl<'a, D: SlotData> Iterator for Iter<'a, D> {
+impl<'a, D: SlotData<'a>> Iterator for Iter<'a, D> {
     type Item = (&'a [u8], &'a D::Value);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -295,9 +308,10 @@ impl<'a, D: SlotData> Iterator for Iter<'a, D> {
     }
 }
 
-impl<'a, D: fmt::Debug + SlotData<Value: fmt::Debug>> fmt::Debug for Iter<'a, D> {
+impl<'a, D: fmt::Debug + SlotData<'a, Value: fmt::Debug>> fmt::Debug for Iter<'a, D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.clone()).finish()
+        let entries: Iter<'a, _> = self.clone();
+        f.debug_map().entries(entries).finish()
     }
 }
 
@@ -310,24 +324,15 @@ impl<'a, D> Clone for Iter<'a, D> {
     }
 }
 
-impl<'a, D: SlotData> ExactSizeIterator for Iter<'a, D> {}
-impl<'a, D: SlotData> FusedIterator for Iter<'a, D> {}
+impl<'a, D: SlotData<'a>> ExactSizeIterator for Iter<'a, D> {}
+impl<'a, D: SlotData<'a>> FusedIterator for Iter<'a, D> {}
 
 pub struct IterMut<'a, D> {
     bucket: &'a mut [Slot<D>],
     rem: usize,
 }
 
-impl<'a, D> IterMut<'a, D> {
-    fn iter(&self) -> Iter<D> {
-        Iter {
-            bucket: self.bucket,
-            rem: self.rem,
-        }
-    }
-}
-
-impl<'a, D: SlotData> Iterator for IterMut<'a, D> {
+impl<'a, D: SlotData<'a>> Iterator for IterMut<'a, D> {
     type Item = (&'a [u8], &'a mut D::Value);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -353,31 +358,27 @@ impl<'a, D: SlotData> Iterator for IterMut<'a, D> {
     }
 }
 
-impl<'a, D: fmt::Debug + SlotData<Value: fmt::Debug>> fmt::Debug for IterMut<'a, D> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
-    }
-}
+// impl<'a, D: fmt::Debug + SlotData<'a, Value: fmt::Debug>> fmt::Debug for IterMut<'a, D> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         let iter = Iter {
+//             bucket: self.bucket,
+//             rem: self.rem,
+//         };
+//         f.debug_map().entries(iter).finish()
+//     }
+// }
 
-impl<'a, D: SlotData> ExactSizeIterator for IterMut<'a, D> {}
-impl<'a, D: SlotData> FusedIterator for IterMut<'a, D> {}
+impl<'a, D: SlotData<'a>> ExactSizeIterator for IterMut<'a, D> {}
+impl<'a, D: SlotData<'a>> FusedIterator for IterMut<'a, D> {}
 
-pub struct IntoIter<D> {
+pub struct IntoIter<'a, D: 'a> {
     bucket: std::vec::IntoIter<Slot<D>>,
     rem: usize,
+    key_alloc: &'a Bump,
 }
 
-impl<D> IntoIter<D> {
-    fn iter(&self) -> Iter<D> {
-        Iter {
-            bucket: self.bucket.as_slice(),
-            rem: self.rem,
-        }
-    }
-}
-
-impl<D: SlotData> Iterator for IntoIter<D> {
-    type Item = (Vec<u8>, D::Value);
+impl<'a, D: SlotData<'a>> Iterator for IntoIter<'a, D> {
+    type Item = (&'a [u8], D::Value);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.rem == 0 {
@@ -388,7 +389,7 @@ impl<D: SlotData> Iterator for IntoIter<D> {
                 Some(slot) => {
                     if let Slot::Data(data) = slot {
                         self.rem -= 1;
-                        break Some(data.into_kv());
+                        break Some(data.into_kv(self.key_alloc));
                     }
                 }
                 None => break None,
@@ -401,11 +402,15 @@ impl<D: SlotData> Iterator for IntoIter<D> {
     }
 }
 
-impl<D: fmt::Debug + SlotData<Value: fmt::Debug>> fmt::Debug for IntoIter<D> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
-    }
-}
+// impl<'a, D: fmt::Debug + SlotData<'a, Value: fmt::Debug>> fmt::Debug for IntoIter<'a, D> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         let iter = Iter {
+//             bucket: self.bucket.as_slice(),
+//             rem: self.rem,
+//         };
+//         f.debug_map().entries(iter).finish()
+//     }
+// }
 
-impl<D: SlotData> ExactSizeIterator for IntoIter<D> {}
-impl<D: SlotData> FusedIterator for IntoIter<D> {}
+impl<'a, D: SlotData<'a>> ExactSizeIterator for IntoIter<'a, D> {}
+impl<'a, D: SlotData<'a>> FusedIterator for IntoIter<'a, D> {}

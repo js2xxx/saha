@@ -1,3 +1,5 @@
+use bumpalo::Bump;
+
 use crate::common;
 
 pub struct SlotData<T, const N: usize> {
@@ -6,10 +8,11 @@ pub struct SlotData<T, const N: usize> {
     value: T,
 }
 
-impl<T, const N: usize> common::SlotData for SlotData<T, N> {
+impl<'a, T, const N: usize> common::SlotData<'a> for SlotData<T, N> {
     type Value = T;
 
-    fn new(key: &[u8], _hash: u64, value: Self::Value) -> Self {
+    #[inline]
+    fn new(_: &'a Bump, key: &[u8], _hash: u64, value: Self::Value) -> Self {
         let mut data = SlotData {
             key: [0; N],
             len: key.len(),
@@ -19,32 +22,41 @@ impl<T, const N: usize> common::SlotData for SlotData<T, N> {
         data
     }
 
+    #[inline]
     fn key(&self) -> &[u8] {
         &self.key[..self.len]
     }
 
+    #[inline]
     fn hash(&self) -> Option<u64> {
         None
     }
 
+    #[inline]
     fn value(&self) -> &Self::Value {
         &self.value
     }
 
+    #[inline]
     fn kv_mut(&mut self) -> (&[u8], &mut Self::Value) {
         (&self.key[..self.len], &mut self.value)
     }
 
+    #[inline]
     fn into_value(self) -> Self::Value {
         self.value
     }
 
-    fn into_kv(self) -> (Vec<u8>, Self::Value) {
-        (Vec::from(&self.key[..self.len]), self.value)
+    #[inline]
+    fn into_kv(self, key_alloc: &'a Bump) -> (&'a [u8], Self::Value) {
+        (
+            key_alloc.alloc_slice_copy(&self.key[..self.len]),
+            self.value,
+        )
     }
 }
 
-pub type StringMap<T, const N: usize> = common::StringMap<SlotData<T, N>>;
+pub type StringMap<'a, T, const N: usize> = common::StringMap<'a, SlotData<T, N>>;
 
 #[cfg(test)]
 mod tests {
@@ -56,7 +68,8 @@ mod tests {
 
     #[test]
     fn test_hash_map() {
-        let mut map = StringMap::<u64, 16>::new();
+        let bump = Bump::new();
+        let mut map = StringMap::<u64, 16>::new(&bump);
         let mut cmp = HashMap::new();
         let hasher = RandomState::default();
 
@@ -81,7 +94,7 @@ mod tests {
             assert_eq!(a1, a2);
         }
 
-        for (k, &v) in map.iter() {
+        for (k, v) in map {
             let value = cmp.remove(k);
             assert_eq!(value, Some(v));
         }
@@ -90,7 +103,8 @@ mod tests {
 
     #[test]
     fn test_conflict() {
-        let mut map = StringMap::<u64, 16>::new();
+        let bump = Bump::new();
+        let mut map = StringMap::<u64, 16>::new(&bump);
         let hasher = RandomState::default();
 
         let value = 111111111111111u64;

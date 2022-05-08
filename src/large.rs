@@ -1,48 +1,57 @@
+use bumpalo::Bump;
+
 use crate::common;
 
-pub struct SlotData<T> {
+pub struct SlotData<'a, T> {
     hash: u64,
-    key: Vec<u8>,
+    key: &'a [u8],
     value: T,
 }
 
-impl<T> common::SlotData for SlotData<T> {
+impl<'a, T> common::SlotData<'a> for SlotData<'a, T> {
     type Value = T;
 
-    fn new(key: &[u8], hash: u64, value: Self::Value) -> Self {
+    #[inline]
+    fn new(key_alloc: &'a Bump, key: &[u8], hash: u64, value: Self::Value) -> Self {
         SlotData {
             hash,
-            key: key.to_owned(),
+            key: key_alloc.alloc_slice_copy(key),
             value,
         }
     }
 
+    #[inline]
     fn key(&self) -> &[u8] {
-        &self.key
+        self.key
     }
 
+    #[inline]
     fn hash(&self) -> Option<u64> {
         Some(self.hash)
     }
 
+    #[inline]
     fn value(&self) -> &Self::Value {
         &self.value
     }
 
+    #[inline]
     fn kv_mut(&mut self) -> (&[u8], &mut Self::Value) {
-        (&self.key, &mut self.value)
+        (self.key, &mut self.value)
     }
 
+    #[inline]
     fn into_value(self) -> Self::Value {
         self.value
     }
 
-    fn into_kv(self) -> (Vec<u8>, Self::Value) {
+    #[inline]
+    fn into_kv(self, _: &'a Bump) -> (&'a [u8], Self::Value) {
         (self.key, self.value)
     }
 }
 
-pub type StringMap<T> = common::StringMap<SlotData<T>>;
+pub type StringMap<'a, T> = common::StringMap<'a, SlotData<'a, T>>;
 
 #[cfg(test)]
 mod tests {
@@ -54,7 +63,8 @@ mod tests {
 
     #[test]
     fn test_hash_map() {
-        let mut map = StringMap::new();
+        let bump = Bump::new();
+        let mut map = StringMap::new(&bump);
         let mut cmp = HashMap::new();
         let hasher = RandomState::default();
 
@@ -78,7 +88,7 @@ mod tests {
         }
 
         for (k, v) in map {
-            let value = cmp.remove(&k);
+            let value = cmp.remove(k);
             assert_eq!(value, Some(v));
         }
         assert!(cmp.is_empty());

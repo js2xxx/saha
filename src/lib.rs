@@ -8,13 +8,14 @@
 #[cfg(test)]
 extern crate test;
 
-mod common;
 mod adaptive;
 mod array;
+mod common;
 mod large;
 mod small;
 
 pub use self::adaptive::StringMap;
 pub use self::array::StringMap as ArrayStringMap;
+pub use self::common::Slot;
 pub use self::large::StringMap as LargeStringMap;
 pub use self::small::StringMap as SmallStringMap;
